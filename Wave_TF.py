@@ -1,28 +1,44 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # Physics Informed Neural Networks (PINNs) - 2D Wave Equation
-# Training Neural Network to converge towards a well-defined solution of a PDE by way of minimising for the residuals across the spatio-temporal domain. Initial and Boundary conditions are met by introducing them into the loss function along with the PDE residuals.
-#
-# Numerical Method - Spectral Solver using FFT. <br>
-# Code taken from [this tutorial.](http://people.bu.edu/andasari/courses/numericalpython/Week12Lecture21/Spectral_wave2.py) <br>
-#
-# Equation:
-# u_tt = u_xx + u_yy on [-1,1] x [-1,1]
-#
-# Dirichlet Boundary Conditions :
-# u=0
-#
-# Initial Distribution :
-#  u(x,y,t=0) = exp(-40(x-4)^2 + y^2)
-#
-# Initial Velocity Condition :
-# u_t(x,y,t=0) = 0
-#
-# m*N layers for mth order PDE
+"""
+------------------------------------------------------------------------------------------------------------------------------------------------------
+Physics Informed Neural Networks (PINNs) -Schrödinger's 2D Wave Equation
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+Training Neural Network to converge towards a well-defined solution of a PDE by way of minimising for the residuals across the spatio-temporal domain.
+Initial and Boundary conditions are met by introducing them into the loss function along with the PDE residuals.
 
-# Building the numerical solution by solving the Wave Equation using a spectral solver implemented on numpy.
-# The solution will not form the training data but will be used for comparing against the PINN solution.
+
+Equation:
+------------------------------------------------------------------------------------------------------------------------------------------
+u_tt = u_xx + u_yy on [-1,1] x [-1,1]
+
+Dirichlet Boundary Conditions :
+u=0
+#
+Initial Distribution :
+u(x,y,t=0) = exp(-40(x-4)^2 + y^2)
+
+Initial Velocity Condition :
+u_t(x,y,t=0) = 0
+
+m*N layers for mth order PDE
+-----------------------------------------
+
+Parameter changes to play with:
+------------------------------------------------------------------------------------------------------------------
+CommandLineArgs class gives 7 parameters that can be changed to edit performance
+3 are sample sizes for training 
+3 are domain specific
+1 is for training loops
+
+Note
+------------------------------------------------------------------------------------------------------------------
+Building the numerical solution by solving the Wave Equation using a spectral solver implemented on numpy.
+Numerical Method - Spectral Solver using FFT with solution code from Boston University with their permission
+
+The numerical solution will not form the training data but will be used for comparing against the PINN solution.
+"""
 
 import os
 import sys
@@ -31,23 +47,26 @@ import argparse
 import numpy as np
 from scipy import interpolate
 from matplotlib import pyplot as plt
-
 from pyDOE import lhs
 import tensorflow as tf
 
+__author__ = "Lucy Harris, Vignesh Gopakumar"
+__license__ = "GPL 2"
+__email__ = "lucy.harris@ukaea.uk"
 
 class CommandLineArgs:
     """
-    CommandLineArgs takes in CLI for user
+    Take arguments from command line
 
-    Parameters for CLI:
-    Epochs                 (-E, --epochs, default=20000)
-    Inital Sampling No.    (-I, --inital, default=1000)
-    Boundary Sampling No.  (-B, --boundary,default=1000)
-    Domain Sampling No.    (-D, --domain, default=20000)
-    Spatial Discretisation (-N, --n-steps, default=50)
-    Simulation Time (s)    (-T, --time, default=1)
-
+    Parameters:
+    ---------------------------------------------------------
+    Epochs                 (-E, --epochs,    default=20000)
+    Inital Sampling No.    (-I, --inital,    default=1000)
+    Boundary Sampling No.  (-B, --boundary,  default=1000)
+    Domain Sampling No.    (-D, --domain,    default=20000)
+    Spatial Discretisation (-N, --n-steps,   default=50)
+    Simulation Time (s)    (-T, --time,      default=1)
+    Grid size              (-G, --grid-size, default=50)
     """
 
     def __init__(self):
@@ -125,6 +144,21 @@ class CommandLineArgs:
 
 
 class WaveEquation:
+    """
+    Numerical method for Schrödinger's 2D wave equation with spectral solver using FFT.
+    Code from Boston University with permission
+
+    Parameters:
+    -----------------------------------------------------------
+    spatial_discretisation (int) : size of discrete resolution in domain
+    simulation_time (int) : number of seconds of simulation
+    grid_size (int) : full size of sample grid domain
+
+    Return:
+    -----------------------------------------------------------
+    numerical solution of output u (array)
+    """
+
     def __init__(self, spatial_discretisation, simulation_time, grid_size):
         self.spatial_discretisation = spatial_discretisation
         self.simulation_time = simulation_time
@@ -153,7 +187,6 @@ class WaveEquation:
     def solve(self):
 
         u_list = []
-        fig = plt.figure()
 
         tc = 0
         nstep = round(self.simulation_time / self.dt) + 1
@@ -165,12 +198,7 @@ class WaveEquation:
             yyy = np.linspace(self.y0, self.yf, self.grid_size)
             vvv = interpolate.interp2d(self.x, self.y, self.vv, kind="cubic")
             Z = vvv(xxx, yyy)
-            """
-            xxf, yyf = np.meshgrid(
-                np.linspace(self.x0, self.xf, self.grid_size),
-                np.linspace(self.y0, self.yf, self.grid_size),
-            )
-            """
+
             uxx = np.zeros(
                 (self.spatial_discretisation + 1, self.spatial_discretisation + 1)
             )
@@ -229,6 +257,26 @@ class WaveEquation:
 
 
 class NumericalSol:
+    """
+    Generating numerical solution for Schrödinger's 2D wave equation
+
+    Parameters:
+    --------------------------------------------------------------------------
+    spatial_discretisation (int) : size of discrete resolution
+    simulation_time (int) : number of seconds of simulation
+    grid_size (int) : full size of sample grid
+
+    Public variable:
+    --------------------------------------------------------------------------
+    dictionary of solution space:
+    x, y, t, upper bound, lower bound, and u solution
+
+    Returns:
+    --------------------------------------------------------------------------
+    numerical solution of u (array)
+
+    """
+
     def __init__(self, spatial_discretisation, simulation_time, grid_size):
         self.spatial_discretisation = spatial_discretisation
         self.simulation_time = simulation_time
@@ -241,14 +289,14 @@ class NumericalSol:
         self.u_sol = simulator.solve()
 
         lb = np.asarray([-1.0, -1.0, 0])  # [x, y, t] Lower Bounds of the domain
-        ub = np.asarray([1.0, 1.0, self.simulation_time])  # Upper Bounds of the domain/
+        ub = np.asarray([1.0, 1.0, self.simulation_time])  # Upper Bounds of the domain
 
         dt = (
             6 / self.spatial_discretisation**2
         )  # spatial_discretisation and dt are fixed for ensuring numerical stability.
 
         lb = np.asarray([-1.0, -1.0, 0])  # [x, y, t] Lower Bounds of the domain
-        ub = np.asarray([1.0, 1.0, self.simulation_time])  # Upper Bounds of the domain/
+        ub = np.asarray([1.0, 1.0, self.simulation_time])  # Upper Bounds of the domain
 
         x = np.linspace(-1, 1, self.grid_size)
         y = x.copy()
@@ -257,7 +305,7 @@ class NumericalSol:
         U_sol = self.u_sol
 
         # Storing the problem and solution information.
-        self.df_dict = {
+        self.sol_dict = {
             "x": x,
             "y": y,
             "t": t,
@@ -270,6 +318,23 @@ class NumericalSol:
 
 
 class PINN(tf.keras.Model):
+    """
+    Creating neural network model
+
+    Size:
+    --------------------------------------------------------------------------
+    3 inputs
+    4 layers with 100 hidden nodes each
+    1 output
+
+    Activation always Tanh
+
+    Returns:
+    --------------------------------------------------------------------------
+    Neural network model
+
+    """
+
     def __init__(self):
         super().__init__()
         self.dense1 = tf.keras.layers.Dense(100, activation=tf.nn.tanh)
@@ -289,6 +354,20 @@ class PINN(tf.keras.Model):
 
 
 class LossFunctions:
+    """
+    Calculation of loss functions for PINN
+
+    Parameters:
+    --------------------------------------------------------------------------
+    simulation_time (int) : number of seconds of simulation
+    model (tf.keras.Model) : NN representation
+
+    Returns:
+    --------------------------------------------------------------------------
+    Neural network model
+
+    """
+
     def __init__(self, simulation_time, model):
         self.x_range = [-1.0, 1.0]
         self.y_range = [-1.0, 1.0]
@@ -352,11 +431,28 @@ class LossFunctions:
 
 
 class DataPrep:
-    def __init__(self, simulation_time, u_sol, df_dict, sample_dict, model):
+    """
+    Preparing data for training
+
+    Parameters:
+    --------------------------------------------------------------------------
+    simulation_time (int) : number of seconds of simulation
+    u_sol (array) : numerical solution of wave
+    sol_dict (dict) : dictionary of numerical solution inputs and output
+    sample_dict (dict) : dictionary of sample sizes, Ni, Nb, Nf
+    model (tf.Keras.Model) : NN representation
+
+    Returns:
+    --------------------------------------------------------------------------
+    data_list (list) : prepared sizes of inputs and outputs ready for training
+
+    """
+
+    def __init__(self, simulation_time, u_sol, sol_dict, sample_dict, model):
         self.u_sol = u_sol
-        self.x = df_dict["x"]
-        self.y = df_dict["y"]
-        self.t = df_dict["t"]
+        self.x = sol_dict["x"]
+        self.y = sol_dict["y"]
+        self.t = sol_dict["t"]
 
         self.grid_length = len(self.x)
 
@@ -425,6 +521,24 @@ class DataPrep:
 
 
 class Training:
+    """
+    Unsupervised training with customised training loss
+
+    loss = initial loss + boundary loss + domain loss
+
+    Parameters:
+    --------------------------------------------------------------------------
+    simulation_time (int) : number of seconds of simulation
+    model (tf.Keras.Model) : NN representation
+    data_list (list) : list of array sizes for inputs and output
+    epochs (int) : number of cyles of training
+
+    Returns:
+    --------------------------------------------------------------------------
+    u_pred (array) : predicted output solution for PINN
+
+    """
+
     def __init__(self, simulation_time, model, data_list, epochs):
         self.model = model
 
@@ -482,15 +596,29 @@ class Training:
 
 
 class Plotting:
+    """
+    Generating plots
+    1. L2 loss over epochs
+    2. Numerical solution against PINN for 3 sample points
+
+    Parameters:
+    --------------------------------------------------------------------------
+    lost_list (list) : generated list of all loss over epochs
+    u_pred (array) : predicted output solution for PINN
+    u_sol (array) : numerical solution of u (array)
+    sol_dict (dict) : dictionary of numerical solution inputs and output
+
+    """
+
     def training_loss(self, loss_list):
         plt.plot(loss_list)
         plt.xlabel("Iterations")
         plt.ylabel("L2 Error")
         plt.show()
 
-    def num_vs_pinn(self, u_sol, u_pred, data_dict):
+    def num_vs_pinn(self, u_sol, u_pred, sol_dict):
         u_field = u_sol
-        t = data_dict["t"]
+        t = sol_dict["t"]
 
         fig = plt.figure(figsize=plt.figaspect(0.5))
         ax = fig.add_subplot(2, 3, 1)
@@ -544,7 +672,7 @@ if __name__ == "__main__":
     model.build(input_shape=(None, 3))
     model.summary()
 
-    data = DataPrep(simulation_time, u_sol, numerical_sol.df_dict, sample_dict, model)
+    data = DataPrep(simulation_time, u_sol, numerical_sol.sol_dict, sample_dict, model)
     data_list = data.prepare()
 
     train_model = Training(simulation_time, model, data_list, epochs)
@@ -555,4 +683,4 @@ if __name__ == "__main__":
 
     plots = Plotting()
     plots.training_loss(lost_list)
-    plots.num_vs_pinn(u_sol, u_pred, numerical_sol.df_dict)
+    plots.num_vs_pinn(u_sol, u_pred, numerical_sol.sol_dict)

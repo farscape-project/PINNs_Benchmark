@@ -2,15 +2,17 @@
 # coding: utf-8
 
 """
-------------------------------------------------------------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------
 Physics Informed Neural Networks (PINNs) -Schrödinger's 2D Wave Equation
------------------------------------------------------------------------------------------------------------------------------------------------------
-Training Neural Network to converge towards a well-defined solution of a PDE by way of minimising for the residuals across the spatio-temporal domain.
-Initial and Boundary conditions are met by introducing them into the loss function along with the PDE residuals.
+---------------------------------------------------------------------------------------
+Training Neural Network to converge towards a well-defined solution of a PDE by way of 
+minimising for the residuals across the spatio-temporal domain.
+Initial and Boundary conditions are met by introducing them into the loss function along
+ with the PDE residuals.
 
 
 Equation:
-------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------
 u_tt = u_xx + u_yy on [-1,1] x [-1,1]
 
 Dirichlet Boundary Conditions :
@@ -26,18 +28,21 @@ m*N layers for mth order PDE
 -----------------------------------------
 
 Parameter changes to play with:
-------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------
 CommandLineArgs class gives 7 parameters that can be changed to edit performance
 3 are sample sizes for training 
 3 are domain specific
 1 is for training loops
 
 Note
-------------------------------------------------------------------------------------------------------------------
-Building the numerical solution by solving the Wave Equation using a spectral solver implemented on numpy.
-Numerical Method - Spectral Solver using FFT with solution code from Boston University with their permission
+-------------------------------------------------------------------------------------
+Building the numerical solution by solving the Wave Equation using a spectral solver 
+implemented on numpy.
+Numerical Method - Spectral Solver using FFT with solution code from Boston University 
+with their permission
 
-The numerical solution will not form the training data but will be used for comparing against the PINN solution.
+The numerical solution will not form the training data but will be used for comparing
+ against the PINN solution.
 """
 
 import os
@@ -145,7 +150,8 @@ class CommandLineArgs:
 
 class WaveEquation:
     """
-    Numerical method for Schrödinger's 2D wave equation with spectral solver using FFT.
+    Numerical method for Schrödinger's 2D wave equation with 
+    spectral solver using FFT.
     Code from Boston University with permission
 
     Parameters:
@@ -385,7 +391,8 @@ class LossFunctions:
 
     def LHS_Sampling(self, sample_size):
         """
-        Function to sample collocation points across the spatio-temporal domain using a Latin Hypercube
+        Function to sample collocation points across the spatio-temporal domain 
+        using a Latin Hypercube
         """
         return self.lb + (self.ub - self.lb) * lhs(3, sample_size)
 

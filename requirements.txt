@@ -1,0 +1,7 @@
+maplotlib==3.2.1
+numpy==1.19.5
+pyDOE==0.3.8
+scipy==1.4.1
+tdqm==0.0.1
+tensorflow==2.6.0
+torch==1.10.2

@@ -3,14 +3,13 @@
 
 """
 ---------------------------------------------------------------------------------------
-Physics Informed Neural Networks (PINNs) -Schrödinger's 2D Wave Equation - TensorFlow
+Physics Informed Neural Networks (PINNs) -Schrödinger's 2D Wave Equation - PyTorch
 ---------------------------------------------------------------------------------------
 Training Neural Network to converge towards a well-defined solution of a PDE by way of 
  minimising for the residuals across the spatio-temporal domain.
 Initial and Boundary conditions are met by introducing them into the loss function along
  with the PDE residuals.
 
-**Using TensorFlow**
 
 Equation:
 -----------------------------------------------------------------------------------------
@@ -35,8 +34,6 @@ CommandLineArgs class gives 7 parameters that can be changed to edit performance
 3 are domain specific
 1 is for training loops
 
-Can also change size of NN by changing PINN class
-
 Note
 -------------------------------------------------------------------------------------
 Building the numerical solution by solving the Wave Equation using a spectral solver 
@@ -51,13 +48,15 @@ The numerical solution will not form the training data but will be used for comp
 import os
 import sys
 import time
+import operator
+from functools import reduce 
 import argparse
 
 import numpy as np
 from scipy import interpolate
 from matplotlib import pyplot as plt
 from pyDOE import lhs
-import tensorflow as tf
+import torch
 
 __author__ = "Lucy Harris, Vignesh Gopakumar"
 __license__ = "GPL 2"
@@ -150,6 +149,28 @@ class CommandLineArgs:
         self.args = pinn_parser.parse_args()
         print("Command grid_sizeine Arguments: ", vars(self.args))
         sys.stdout.flush()
+
+class TorchConfig:
+    def __init__(self):
+        self.default_device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype=torch.float32
+        torch.set_default_dtype(dtype)
+
+    def torch_tensor_grad(self, x, device):
+        if device == 'cuda':
+            x = torch.cuda.FloatTensor(x)
+        else:
+            x = torch.FloatTensor(x)
+        x.requires_grad = True
+        return x 
+
+    def torch_tensor_nograd(self, x, device):
+        if device == 'cuda':
+            x = torch.cuda.FloatTensor(x)
+        else:
+            x = torch.FloatTensor(x)
+        x.requires_grad = False
+        return x 
 
 
 class WaveEquation:
@@ -326,8 +347,8 @@ class NumericalSol:
 
         return self.u_sol
 
-
-class PINN(tf.keras.Model):
+# Fully Connected Network or a Multi-Layer Perceptron as the PINN. 
+class PINN(torch.nn.Module):
     """
     Creating neural network model
 
@@ -344,24 +365,38 @@ class PINN(tf.keras.Model):
     Neural network model
 
     """
+    def __init__(self, in_features, out_features, num_layers, num_neurons, activation=torch.tanh):
+        super(PINN, self).__init__()
 
-    def __init__(self):
-        super().__init__()
-        self.dense1 = tf.keras.layers.Dense(100, activation=tf.nn.tanh)
-        self.dense2 = tf.keras.layers.Dense(100, activation=tf.nn.tanh)
-        self.dense3 = tf.keras.layers.Dense(100, activation=tf.nn.tanh)
-        self.dense4 = tf.keras.layers.Dense(100, activation=tf.nn.tanh)
-        self.output_layer = tf.keras.layers.Dense(1)
+        self.in_features = in_features
+        self.out_features = out_features
+        self.num_layers = num_layers
+        self.num_neurons = num_neurons
 
-    def call(self, inputs):
-        x = self.dense1(inputs)
-        x = self.dense2(x)
-        x = self.dense3(x)
-        x = self.dense4(x)
-        x = self.output_layer(x)
+        self.act_func = activation
 
-        return x
+        self.layers = torch.nn.ModuleList()
 
+        self.layer_input = torch.nn.Linear(self.in_features, self.num_neurons)
+
+        for ii in range(self.num_layers - 1):
+            self.layers.append(torch.nn.Linear(self.num_neurons, self.num_neurons))
+        self.layer_output = torch.nn.Linear(self.num_neurons, self.out_features)
+
+    def forward(self, x):
+
+        x_temp = self.act_func(self.layer_input(x))
+        for dense in self.layers:
+            x_temp = self.act_func(dense(x_temp))
+        x_temp = self.layer_output(x_temp)
+        return x_temp
+
+    def count_params(self):
+        c = 0
+        for p in self.parameters():
+            c += reduce(operator.mul, list(p.size()))
+        return c 
+      
 
 class LossFunctions:
     """
@@ -370,13 +405,13 @@ class LossFunctions:
     Parameters:
     --------------------------------------------------------------------------
     simulation_time (int) : number of seconds of simulation
-    model (tf.keras.Model) : NN representation
+    model (torch.nn.Model) : NN representation
 
     Returns:
     --------------------------------------------------------------------------
     LHS_Sampling function -> Collocation point sampling (array)
     other functions -> return initial, boundary, pde, recostruction loss
-    type is tf Tensor
+    type is torch Tensor
     """
 
     def __init__(self, simulation_time, model):
@@ -386,13 +421,16 @@ class LossFunctions:
         self.D = 1.0
 
         self.model = model
-
         self.lb = np.asarray(
             [self.x_range[0], self.y_range[0], self.t_range[0]]
         )  # lower bounds
         self.ub = np.asarray(
             [self.x_range[1], self.y_range[1], self.t_range[1]]
         )  # Upper bounds
+
+        # Setting up a derivative function that goes through the graph and calculates via chain rule the derivative of u wrt x 
+        self.derive = lambda u, x: torch.autograd.grad(u, x, grad_outputs=torch.ones_like(u), create_graph=True, allow_unused=True)[0]
+       
 
     def LHS_Sampling(self, sample_size):
         """
@@ -401,45 +439,57 @@ class LossFunctions:
         """
         return self.lb + (self.ub - self.lb) * lhs(3, sample_size)
 
-    @tf.function
     def pde(self, X):
+        """
+        Domain Loss Function - measuring the deviation from the PDE functional. 
+        """
         x = X[:, 0:1]
         y = X[:, 1:2]
         t = X[:, 2:3]
-        u = self.model(tf.concat([x, y, t], 1))
+        u = self.model(torch.cat([x,y,t],1))
 
-        u_x = tf.gradients(u, x)[0]
-        u_xx = tf.gradients(u_x, x)[0]
-        u_y = tf.gradients(u, y)[0]
-        u_yy = tf.gradients(u_y, y)[0]
-        u_t = tf.gradients(u, t)[0]
-        u_tt = tf.gradients(u_t, t)[0]
-        pde_loss = u_tt - self.D * (u_xx + u_yy)
+        u_x = self.derive(u, x)
+        u_xx = self.derive(u_x, x)
+        u_y = self.derive(u, y)
+        u_yy = self.derive(u_y, y)
+        u_t = self.derive(u, t)
+        u_tt = self.derive(u_t, t)
+        
+        pde_loss = u_tt - (u_xx + u_yy)
 
-        return tf.reduce_mean(tf.square(pde_loss))
+        return pde_loss.pow(2).mean()
 
     def boundary(self, X):
+        """
+        Boundary Loss Function - measuring the deviation from boundary conditions for f(x_lim, y_lim, t)
+        """
         u = self.model(X)
-        bc_loss = u - 0
-        return tf.reduce_mean(tf.square(bc_loss))
+        bc_loss = u - 0 
 
-    @tf.function
+        return bc_loss.pow(2).mean()
+
     def initial_velocity(self, X):
+        """
+        Initial velocity conditions
+        """
         x = X[:, 0:1]
         y = X[:, 1:2]
         t = X[:, 2:3]
+        u = self.model(torch.cat([x,y,t],1))
 
-        u = self.model(tf.concat([x, y, t], 1))
+        u_t = self.derive(u, t)
+        initial_cond_loss = u_t - 0
 
-        u_t = tf.gradients(u, t)[0]
-        initial_cond_loss = u_t
+        return initial_cond_loss.pow(2).mean()
 
-        return tf.reduce_mean(tf.square(initial_cond_loss))
-
+    
     def reconstruction(self, X, Y):
+        """
+        Reconstruction Loss Function - measuring the deviation fromt the actual output. Used to calculate the initial loss
+        """
         u = self.model(X)
-        recon_loss = u - Y
-        return tf.reduce_mean(tf.square(recon_loss))
+        recon_loss = u-Y
+        return recon_loss.pow(2).mean()
 
 
 class DataPrep:
@@ -453,6 +503,7 @@ class DataPrep:
     sol_dict (dict) : dictionary of numerical solution inputs and output
     sample_dict (dict) : dictionary of sample sizes, Ni, Nb, Nf
     model (tf.Keras.Model) : NN representation
+    config_obj (class object) : torch configuration (default device)
 
     Returns:
     --------------------------------------------------------------------------
@@ -460,7 +511,7 @@ class DataPrep:
 
     """
 
-    def __init__(self, simulation_time, u_sol, sol_dict, sample_dict, model):
+    def __init__(self, simulation_time, u_sol, sol_dict, sample_dict, model, config_obj):
         self.u_sol = u_sol
         self.x = sol_dict["x"]
         self.y = sol_dict["y"]
@@ -472,6 +523,8 @@ class DataPrep:
         self.N_i = sample_dict["N_i"]  # Initial
         self.N_b = sample_dict["N_b"]  # Boundary
         self.N_f = sample_dict["N_f"]  # Domain
+
+        self.config_obj = config_obj
 
         self.loss_fnc = LossFunctions(simulation_time, model)
 
@@ -517,10 +570,10 @@ class DataPrep:
         self.X_f = self.loss_fnc.LHS_Sampling(self.N_f)
 
     def convert_tensors(self):
-        self.X_i = tf.convert_to_tensor(self.X_i, dtype=tf.float32)
-        self.Y_i = tf.convert_to_tensor(self.u_i, dtype=tf.float32)
-        self.X_b = tf.convert_to_tensor(self.X_b, dtype=tf.float32)
-        self.X_f = tf.convert_to_tensor(self.X_f, dtype=tf.float32)
+        self.X_i = self.config_obj.torch_tensor_grad(self.X_i, self.config_obj.default_device)
+        self.Y_i = self.config_obj.torch_tensor_nograd(self.u_i, self.config_obj.default_device)
+        self.X_b = self.config_obj.torch_tensor_grad(self.X_b, self.config_obj.default_device)
+        self.X_f = self.config_obj.torch_tensor_grad(self.X_f, self.config_obj.default_device)
 
     def prepare(self):
         self.prep_io()
@@ -541,9 +594,10 @@ class Training:
     Parameters:
     --------------------------------------------------------------------------
     simulation_time (int) : number of seconds of simulation
-    model (tf.Keras.Model) : NN representation
+    model (torch.nn.Model) : NN representation
     data_list (list) : list of array sizes for inputs and output
     epochs (int) : number of cyles of training
+    config_obj (class object) : torch configuration (default device)
 
     Returns:
     --------------------------------------------------------------------------
@@ -551,16 +605,19 @@ class Training:
 
     """
 
-    def __init__(self, simulation_time, model, data_list, epochs):
+    def __init__(self, simulation_time, model, data_list, epochs, config_obj):
         self.model = model
 
         # random seed
         seed = 42
-        tf.random.set_seed(seed)
+        torch.manual_seed(seed)
         np.random.seed(seed)
 
-        self.optimiser = tf.keras.optimizers.Adam(learning_rate=1e-3, beta_1=0.90)
+        self.optimiser = torch.optim.Adam(model.parameters(), lr=1e-3)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimiser, step_size=5000, gamma=0.9)
+        
         self.epochs = epochs
+        self.config_obj = config_obj
         self.loss_list = []
 
         self.X_star, self.u_actual, self.X_i, self.Y_i, self.X_b, self.X_f = data_list
@@ -570,44 +627,46 @@ class Training:
     def training_loop(self):
         it = 0
         start_time = time.time()
-        while it < self.epochs:
-            with tf.GradientTape() as tape:
-                initial_loss = self.loss_fnc.reconstruction(
-                    self.X_i, self.Y_i
-                ) + self.loss_fnc.initial_velocity(self.X_i)
-                boundary_loss = self.loss_fnc.boundary(self.X_b)
-                domain_loss = self.loss_fnc.pde(self.X_f)
 
-                print("Type of initial: ", type(initial_loss))
-                print("Type of boundary: ", type(boundary_loss))
-                print("Type of domain: ", type(domain_loss))
+        while it < epochs :
+            self.optimiser.zero_grad()
 
-                loss = initial_loss + boundary_loss + domain_loss
+            initial_loss = self.loss_fnc.reconstruction(self.X_i, self.Y_i) + self.loss_fnc.initial_velocity(self.X_i)
+            boundary_loss = self.loss_fnc.boundary(self.X_b)
+            domain_loss = self.loss_fnc.pde(self.X_f)
 
-                grads = tape.gradient(loss, self.model.trainable_variables)
-                self.optimiser.apply_gradients(
-                    zip(grads, self.model.trainable_variables)
-                )
-
-            self.loss_list.append(loss)
+            loss = initial_loss + boundary_loss + domain_loss   
+            self.loss_list.append(loss.item())
+            
+            loss.backward()
+            self.optimiser.step()
+            self.scheduler.step()
 
             it += 1
 
-            print(
-                "It: %d, Init: %.3e, Bound: %.3e, Domain: %.3e"
-                % (it, initial_loss, boundary_loss, domain_loss)
-            )
-
+            print('It: %d, Init: %.3e, Bound: %.3e, Domain: %.3e' % (it, initial_loss.item(), boundary_loss.item(), domain_loss.item()))
+        
         self.train_time = time.time() - start_time
+        self.loss_list.append(loss)
 
+        print(
+            "It: %d, Init: %.3e, Bound: %.3e, Domain: %.3e"
+            % (it, initial_loss, boundary_loss, domain_loss)
+        )
         return self.loss_list
 
     def trained_output(self):
-        u_pred = self.model(tf.convert_to_tensor(self.X_star, dtype=tf.float32)).numpy()
+        if self.config_obj.default_device == 'cpu':
+            with torch.no_grad():
+                u_pred = self.model(self.config_obj.torch_tensor_grad(self.X_star, self.config_obj.default_device)).detach().numpy()
+
+        else : 
+            with torch.no_grad():
+                u_pred = self.model(self.config_obj.torch_tensor_grad(self.X_star, self.config_obj.default_device)).cpu().detach().numpy()
+ 
         l2_error = np.mean((self.u_actual - u_pred) ** 2)
 
         print("Training Time: %d seconds, L2 Error: %.3e" % (self.train_time, l2_error))
-
         u_pred = u_pred.reshape(len(data.u), data.grid_length, data.grid_length)
 
         return u_pred
@@ -669,7 +728,7 @@ class Plotting:
 
 if __name__ == "__main__":
 
-    print("Tf test gpu name: ", tf.test.gpu_device_name())
+    config = TorchConfig()
 
     command_line = CommandLineArgs()
 
@@ -686,14 +745,13 @@ if __name__ == "__main__":
     numerical_sol = NumericalSol(spartial_discretisation, simulation_time, grid_size)
     u_sol = numerical_sol.solve_numerical()
 
-    model = PINN()
-    model.build(input_shape=(None, 3))
-    model.summary()
+    model = PINN(in_features=3, out_features=1, num_layers=5, num_neurons=100)
+    model = model.to(config.default_device)
 
-    data = DataPrep(simulation_time, u_sol, numerical_sol.sol_dict, sample_dict, model)
+    data = DataPrep(simulation_time, u_sol, numerical_sol.sol_dict, sample_dict, model, config)
     data_list = data.prepare()
 
-    train_model = Training(simulation_time, model, data_list, epochs)
+    train_model = Training(simulation_time, model, data_list, epochs, config)
     lost_list = train_model.training_loop()
 
     u_pred = train_model.trained_output()

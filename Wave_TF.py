@@ -3,7 +3,7 @@
 
 """
 ---------------------------------------------------------------------------------------
-Physics Informed Neural Networks (PINNs) -Schrödinger's 2D Wave Equation - TensorFlow
+Physics Informed Neural Networks (PINNs) -2D Wave Equation - TensorFlow
 ---------------------------------------------------------------------------------------
 Training Neural Network to converge towards a well-defined solution of a PDE by way of 
  minimising for the residuals across the spatio-temporal domain.

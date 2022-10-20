@@ -148,14 +148,12 @@ class CommandLineArgs:
         )
 
         self.args = pinn_parser.parse_args()
-        print("Command grid_sizeine Arguments: ", vars(self.args))
         sys.stdout.flush()
 
 
 class WaveEquation:
     """
-    Numerical method for Schrödinger's 2D wave equation with 
-    spectral solver using FFT.
+    Numerical method for 2D wave equation with spectral solver using FFT.
     Code from Boston University with permission
 
     Parameters:
@@ -577,10 +575,6 @@ class Training:
                 ) + self.loss_fnc.initial_velocity(self.X_i)
                 boundary_loss = self.loss_fnc.boundary(self.X_b)
                 domain_loss = self.loss_fnc.pde(self.X_f)
-
-                print("Type of initial: ", type(initial_loss))
-                print("Type of boundary: ", type(boundary_loss))
-                print("Type of domain: ", type(domain_loss))
 
                 loss = initial_loss + boundary_loss + domain_loss
 

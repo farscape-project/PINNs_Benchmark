@@ -175,8 +175,7 @@ class TorchConfig:
 
 class WaveEquation:
     """
-    Numerical method for Schrödinger's 2D wave equation with 
-    spectral solver using FFT.
+    Numerical method for 2D wave equation with spectral solver using FFT.
     Code from Boston University with permission
 
     Parameters:
